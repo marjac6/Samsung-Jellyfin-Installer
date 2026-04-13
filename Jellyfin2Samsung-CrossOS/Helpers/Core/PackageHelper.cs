@@ -41,27 +41,56 @@ namespace Jellyfin2Samsung.Helpers.Core
         }
         public async Task<bool> InstallPackageAsync(string? packagePath, NetworkDevice selectedDevice, CancellationToken cancellationToken, ProgressCallback? progress = null, Action? onSamsungLoginStarted = null)
         {
-            if(selectedDevice.DeveloperIP == null) return false;
+            bool isEmulator = selectedDevice.IpAddress == "127.0.0.1" || selectedDevice.IpAddress == "localhost";
 
-            var localIps = _networkService.GetRelevantLocalIPs()
-                              .Select(ip => ip.ToString())
-                              .ToList();
-
-            bool ipMismatch = !localIps.Contains(selectedDevice.DeveloperIP) && !string.IsNullOrEmpty(selectedDevice.DeveloperIP);
-
-            if (!string.IsNullOrEmpty(AppSettings.Default.LocalIp)
-                && !string.IsNullOrEmpty(selectedDevice.DeveloperIP)
-                && _networkService.IsDifferentSubnet(AppSettings.Default.LocalIp, selectedDevice.DeveloperIP))
+            if (!isEmulator)
             {
-                bool continueExecution =
-                    await _dialogService.ShowConfirmationAsync(
-                        "Subnet Mismatch",
-                        "subnetMismatch".Localized(),
-                        "keyContinue".Localized(),
-                        "keyStop".Localized());
+                if(selectedDevice.DeveloperIP == null) return false;
 
-                if (!continueExecution)
-                    return false;
+                var localIps = _networkService.GetRelevantLocalIPs()
+                                  .Select(ip => ip.ToString())
+                                  .ToList();
+
+                bool ipMismatch = !localIps.Contains(selectedDevice.DeveloperIP) && !string.IsNullOrEmpty(selectedDevice.DeveloperIP);
+
+                if (!string.IsNullOrEmpty(AppSettings.Default.LocalIp)
+                    && !string.IsNullOrEmpty(selectedDevice.DeveloperIP)
+                    && _networkService.IsDifferentSubnet(AppSettings.Default.LocalIp, selectedDevice.DeveloperIP))
+                {
+                    bool continueExecution =
+                        await _dialogService.ShowConfirmationAsync(
+                            "Subnet Mismatch",
+                            "subnetMismatch".Localized(),
+                            "keyContinue".Localized(),
+                            "keyStop".Localized());
+
+                    if (!continueExecution)
+                        return false;
+                }
+
+                if (selectedDevice.DeveloperMode == "0")
+                {
+                    bool devmodeExecution = await _dialogService.ShowConfirmationAsync("Developer Disabled", "DeveloperModeRequired".Localized(), "keyContinue".Localized(), "keyStop".Localized());
+                    if (!devmodeExecution)
+                        return false;
+                }
+
+                if (ipMismatch && AppSettings.Default.RTLReading)
+                {
+                    ipMismatch = !localIps
+                        .Select(ip => _networkService.InvertIPAddress(ip))
+                        .Contains(selectedDevice.DeveloperIP);
+
+                    if (!ipMismatch)
+                        selectedDevice.IpAddress = selectedDevice.DeveloperIP;
+                }
+
+                if (ipMismatch)
+                {
+                    bool continueExecution = await _dialogService.ShowConfirmationAsync("IP Mismatch", "DeveloperIPMismatch".Localized(), "keyContinue".Localized(), "keyStop".Localized());
+                    if (!continueExecution)
+                        return false;
+                }
             }
 
             if (string.IsNullOrEmpty(packagePath) || !File.Exists(packagePath))
@@ -76,30 +105,6 @@ namespace Jellyfin2Samsung.Helpers.Core
                 progress?.Invoke("NoDeviceSelected".Localized());
                 await _dialogService.ShowErrorAsync("NoDeviceSelected".Localized());
                 return false;
-            }
-
-            if (selectedDevice.DeveloperMode == "0")
-            {
-                bool devmodeExecution = await _dialogService.ShowConfirmationAsync("Developer Disabled", "DeveloperModeRequired".Localized(), "keyContinue".Localized(), "keyStop".Localized());
-                if (!devmodeExecution)
-                    return false;
-            }
-
-            if (ipMismatch && AppSettings.Default.RTLReading)
-            {
-                ipMismatch = !localIps
-                    .Select(ip => _networkService.InvertIPAddress(ip))
-                    .Contains(selectedDevice.DeveloperIP);
-
-                if (!ipMismatch)
-                    selectedDevice.IpAddress = selectedDevice.DeveloperIP;
-            }
-
-            if (ipMismatch)
-            {
-                bool continueExecution = await _dialogService.ShowConfirmationAsync("IP Mismatch", "DeveloperIPMismatch".Localized(), "keyContinue".Localized(), "keyStop".Localized());
-                if (!continueExecution)
-                    return false;
             }
 
             try

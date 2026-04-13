@@ -16,6 +16,7 @@ namespace Jellyfin2Samsung.Helpers
         public static readonly string ProfilePath = Path.Combine(FolderPath, "Assets", "TizenProfile");
         public static readonly string EsbuildPath = Path.Combine(FolderPath, "Assets", "esbuild");
         public static readonly string DownloadPath = Path.Combine(FolderPath, "Downloads");
+        public static readonly string TizenBatPath = "C:\\tizen-studio\\tools\\ide\\bin\\tizen.bat";
 
         private static AppSettings? _instance;
 

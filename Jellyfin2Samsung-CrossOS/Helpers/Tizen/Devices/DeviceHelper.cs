@@ -1,4 +1,5 @@
-﻿using Jellyfin2Samsung.Helpers.API;
+﻿using System;
+using Jellyfin2Samsung.Helpers.API;
 using Jellyfin2Samsung.Interfaces;
 using Jellyfin2Samsung.Models;
 using System.Collections.Generic;
@@ -60,6 +61,62 @@ namespace Jellyfin2Samsung.Helpers.Tizen.Devices
                     catch { }
                 }
             }
+
+            // Dodaj wykrywanie emulatorów przez sdb devices
+
+            try
+            {
+                var sdbPath = "sdb";
+                var process = new System.Diagnostics.Process
+                {
+                    StartInfo = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = sdbPath,
+                        Arguments = "devices",
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    }
+                };
+                process.Start();
+                string output = await process.StandardOutput.ReadToEndAsync();
+                process.WaitForExit();
+
+                // Loguj wyjście do pliku debug_... w katalogu Logs
+                try
+                {
+                    string exeDir = System.AppContext.BaseDirectory;
+                    string logFolder = System.IO.Path.Combine(exeDir, "Logs");
+                    System.IO.Directory.CreateDirectory(logFolder);
+                    string logFilePath = System.IO.Path.Combine(logFolder, $"debug_sdb_devices_{System.DateTime.Now:yyyy-MM-dd_HH-mm-ss-fff}.log");
+                    await System.IO.File.WriteAllTextAsync(logFilePath, output);
+                }
+                catch { }
+
+                // Parsuj każdą linię zaczynającą się od emulator-
+                foreach (var line in output.Split('\n'))
+                {
+                    var trimmed = line.Trim();
+                    if (trimmed.StartsWith("emulator-"))
+                    {
+                        var parts = trimmed.Split(new[] { ' ', '\t' }, System.StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 1)
+                        {
+                            string emulatorId = parts[0];
+                            devices.Add(new NetworkDevice
+                            {
+                                IpAddress = emulatorId,
+                                Manufacturer = "Tizen",
+                                DeviceName = emulatorId,
+                                ModelName = "Emulator",
+                                DeveloperMode = "1",
+                                DeveloperIP = emulatorId
+                            });
+                        }
+                    }
+                }
+            }
+            catch { }
 
             return devices;
         }

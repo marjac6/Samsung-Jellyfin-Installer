@@ -224,9 +224,56 @@ namespace Jellyfin2Samsung.Services
                     return InstallResult.FailureResult(Constants.LocalizationKeys.InstallTizenSdb.Localized());
                 }
             }
-        
+
+
+            // Specjalna obsługa emulatora (localhost/127.0.0.1 lub emulator-xxxx)
+            bool isEmulator = tvIpAddress == "127.0.0.1" || tvIpAddress == "localhost" || tvIpAddress.StartsWith("emulator-");
+            string emulatorSdbPort = "26101"; // domyślny port SDB emulatora Tizen
+            string sdbTarget = isEmulator && (tvIpAddress == "127.0.0.1" || tvIpAddress == "localhost") ? $"{tvIpAddress}:{emulatorSdbPort}" : tvIpAddress;
+
             try
             {
+                if (isEmulator)
+                {
+                    // Jeśli adres to emulator-xxxx, resignujemy paczkę własnym certyfikatem i instalujemy przez tizen.bat
+                    if (tvIpAddress.StartsWith("emulator-"))
+                    {
+                        progress?.Invoke("Resigning package for emulator...");
+                        var certDir = Path.Combine(AppSettings.CertificatePath, "Jellyfin");
+                        var authorP12 = Path.Combine(certDir, "author.p12");
+                        var distributorP12 = Path.Combine(certDir, "distributor.p12");
+                        var p12Password = File.ReadAllText(Path.Combine(certDir, "password.txt")).Trim();
+                        var resignResult = await ResignPackageAsync(packageUrl, authorP12, distributorP12, p12Password);
+                        if (resignResult.ExitCode != 0)
+                        {
+                            return InstallResult.FailureResult($"Resign failed: {resignResult.Output}");
+                        }
+                        progress?.Invoke(Constants.LocalizationKeys.InstallingPackage.Localized());
+                        var tizenBatPath = AppSettings.TizenBatPath;
+                        var wgtName = Path.GetFileName(packageUrl);
+                        var args = $"install -n \"{wgtName}\" -s \"{tvIpAddress}\"";
+                        var workingDir = Path.GetDirectoryName(packageUrl);
+                        var result = await _processHelper.RunCommandAsync(tizenBatPath, args, workingDir);
+                        if (result.ExitCode == 0 && result.Output.Contains("success", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return InstallResult.SuccessResult();
+                        }
+                        else
+                        {
+                            return InstallResult.FailureResult($"Tizen CLI install failed: {result.Output}");
+                        }
+                    }
+                    // Emulator na localhost/127.0.0.1 (stary tryb) – zachowaj dotychczasową logikę
+                    progress?.Invoke(Constants.LocalizationKeys.InstallingPackage.Localized());
+                    return await HandleInstallationResultAsync(
+                        sdbTarget,
+                        packageUrl,
+                        Constants.Defaults.SdkToolPath,
+                        progress,
+                        cancellationToken,
+                        onSamsungLoginStarted);
+                }
+                // ...standardowa logika dla TV...
                 // Step 1: Prepare device and check for existing installations
                 var prepareResult = await PrepareDeviceAsync(tvIpAddress, packageUrl, progress, cancellationToken);
                 if (!prepareResult.Success)
@@ -753,9 +800,16 @@ namespace Jellyfin2Samsung.Services
 
         private async Task<ProcessResult> InstallPackageOnDeviceAsync(string tvIpAddress, string packagePath, string sdkToolPath)
         {
+            // Jeśli emulator, zamień 'emulator-xxxx' na '127.0.0.1:xxxx'
+            string deviceArg = tvIpAddress;
+            if (tvIpAddress.StartsWith("emulator-"))
+            {
+                var portPart = tvIpAddress.Substring("emulator-".Length);
+                deviceArg = $"127.0.0.1:{portPart}";
+            }
             return await _processHelper.RunCommandAsync(
                 TizenSdbPath!,
-                $"install {tvIpAddress} \"{packagePath}\" {sdkToolPath}");
+                $"install {deviceArg} \"{packagePath}\" {sdkToolPath}");
         }
 
         private async Task<ProcessResult> UninstallPackageAsync(string tvIpAddress, string packageId)
